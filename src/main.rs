@@ -1,128 +1,82 @@
+mod unifi;
+
 use ::clap::Parser;
 use reqwest::Error;
-use reqwest::header::{HeaderMap, HeaderValue};
-use serde::Deserialize;
-use serde_json::Value;
 use std::env;
+use unifi::{SitesResponse, UnifiClient};
 
 #[derive(Parser, Debug)]
-#[command(version, about)]
-struct CmdArgs {
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Unifi controller endpoint URL (e.g., "https://192.168.3.254")
     #[arg(short, long)]
-    device: String,
+    endpoint: Option<String>,
 
+    /// Unifi API Token
     #[arg(short, long)]
-    backup: bool,
-
-    #[arg(short, long)]
-    endpoint: String,
-
-    #[arg(short, long)]
-    token: String,
+    token: Option<String>,
 }
 
-// https://192.168.3.254/proxy/network/integration/v1/info
 #[tokio::main]
-async fn main() -> Result<(), Error> {
-    let api_token = match env::var_os("API_TOKEN") {
-        Some(v) => v.into_string().unwrap(),
-        None => panic!("$API_TOKEN is not set"),
-    };
+async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
 
-    let mut headers = HeaderMap::new();
-    headers.insert("X-API-KEY", HeaderValue::from_str(&api_token).unwrap());
+    let unifi_endpoint = args.endpoint.unwrap_or_else(|| {
+        env::var("UNIFI_API_ENDPOINT").unwrap_or_else(|_| {
+            let default_endpoint = "https://192.168.3.254".to_string();
+            println!(
+                "No endpoint provided via CLI or UNIFI_API_ENDPOINT env var. Using default: {}",
+                default_endpoint
+            );
+            default_endpoint
+        })
+    });
 
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .default_headers(headers)
-        .build()?;
+    let unifi_api_token = args.token.or_else(|| env::var("UNIFI_API_TOKEN").ok())
+        .ok_or_else(|| anyhow::anyhow!("UNIFI_API_TOKEN not provided. Please set it via --api-token CLI option or UNIFI_API_TOKEN environment variable."))?;
 
-    let response = client
-        .get("https://192.168.3.254/proxy/network/integration/v1/info")
-        .send()
-        .await?;
+    let mut client = UnifiClient::new(&unifi_endpoint, unifi_api_token)?;
+    println!("Attempting to authenticate...");
+    client.authenticate().await?;
 
-    println!("Status: {}", response.status());
-    let body = response.text().await?;
+    println!("Successfully authenticated with Unifi controller!");
+    println!("\nFetching Unifi sites...");
+    match client.get_sites().await {
+        Ok(sites) => {
+            println!("Successfully fetched sites:");
 
-    println!("Body:{}", body);
+            // Pretty print the JSON response
+            println!("{}", serde_json::to_string_pretty(&sites)?);
 
-    let sites_response = get_sites(&client, "192.168.3.254".to_string()).await;
-    let mut site_id: Option<String> = None;
+            // Try to extract a site ID to fetch devices
+            if let Some(sites_array) = sites["data"].as_array() {
+                if let Some(first_site) = sites_array.first() {
+                    if let Some(site_id) = first_site["id"].as_str() {
+                        println!("\nUsing first site ID: {}", site_id);
 
-    match serde_json::from_str::<SitesResponse>(&sites_response.unwrap()) {
-        Ok(sites_data) => {
-            println!("Successfully retrieved and parsed sites data:");
-            println!("{:#?}", sites_data);
-
-            if let Some(first_site) = sites_data.data.first() {
-                site_id = Some(first_site.id.clone());
-                println!("Site ID: {}, Name: {}", first_site.id, first_site.name);
+                        // 4. Fetch devices for the first site
+                        println!("Fetching devices for site '{}'...", site_id);
+                        match client.get_devices(site_id).await {
+                            Ok(devices) => {
+                                println!("Successfully fetched devices:");
+                                println!("{}", serde_json::to_string_pretty(&devices)?);
+                            }
+                            Err(e) => eprintln!("Error fetching devices: {:?}", e),
+                        }
+                    } else {
+                        println!("Could not find 'id' for the first site.");
+                    }
+                } else {
+                    println!("No sites found in the response.");
+                }
+            } else {
+                println!("'data' field not found or not an array in sites response.");
             }
         }
-        Err(e) => {
-            eprintln!("Error parsing JSON into SitesResponse struct: {}", e);
-            println!("Raw body (could not parse as SitesResponse)",);
-        }
+        Err(e) => eprintln!("Error fetching sites: {:?}", e),
     }
 
-    let devices_response = get_devices(&client, "192.168.3.254".to_string(), site_id.unwrap())
-        .await
-        .unwrap()
-        .to_string();
-    println!("{}", devices_response);
+    println!("\nUnifi Exporter Application finished.");
 
     Ok(())
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Site {
-    pub id: String,
-    pub internal_reference: String,
-    pub name: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SitesResponse {
-    pub offset: u32,
-    pub limit: u32,
-    pub count: u32,
-    pub total_count: u32,
-    pub data: Vec<Site>,
-}
-
-// https://192.168.3.254/proxy/network/integration/v1/sites
-async fn get_sites(client: &reqwest::Client, endpoint: String) -> Result<String, reqwest::Error> {
-    let sites_response = client
-        .get(format!(
-            "https://{}/proxy/network/integration/v1/sites",
-            endpoint
-        ))
-        .send()
-        .await?;
-
-    let sites_body = sites_response.text().await?;
-
-    Ok(sites_body)
-}
-
-// https://192.168.3.254/proxy/network/integration/v1/sites/{siteId}/devices
-async fn get_devices(
-    client: &reqwest::Client,
-    endpoint: String,
-    site: String,
-) -> Result<String, reqwest::Error> {
-    let devices_response = client
-        .get(format!(
-            "https://{}/proxy/network/integration/v1/sites/{}/devices",
-            endpoint, site
-        ))
-        .send()
-        .await?;
-
-    let devices_body = devices_response.text().await?;
-
-    Ok(devices_body)
 }
