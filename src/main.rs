@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let unifi_api_token = args.token.or_else(|| env::var("UNIFI_API_TOKEN").ok())
-        .ok_or_else(|| anyhow::anyhow!("UNIFI_API_TOKEN not provided. Please set it via --api-token CLI option or UNIFI_API_TOKEN environment variable."))?;
+        .ok_or_else(|| anyhow::anyhow!("UNIFI_API_TOKEN not provided. Please set it via --token CLI option or UNIFI_API_TOKEN environment variable."))?;
 
     let mut client = UnifiClient::new(&unifi_endpoint, unifi_api_token)?;
     println!("Attempting to authenticate...");
