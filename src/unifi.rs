@@ -2,12 +2,14 @@ use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::sync::Arc;
+use std::collections::HashMap;
 use url::Url;
 
 const API_PATH_INFO: &str = "/proxy/network/integration/v1/info";
 const API_PATH_SITES: &str = "/proxy/network/integration/v1/sites";
 const API_PATH_DEVICES: &str = "/proxy/network/integration/v1/sites/{site_id}/devices";
+const API_PATH_DEVICE_STATS: &str =
+    "/proxy/network/integration/v1/sites/{site_id}/devices/{device_id}/statistics/latest";
 
 pub struct UnifiClient {
     client: Client,
@@ -56,6 +58,63 @@ pub struct Device {
     pub model: String,
     pub name: String,
     pub state: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeviceStats {
+    #[serde(rename = "cpuUtilizationPct")]
+    pub cpu_utilization_pct: f64,
+
+    #[serde(rename = "interfaces")]
+    pub interfaces: Interfaces,
+
+    #[serde(rename = "lastHeartbeatAt")]
+    pub last_heartbeat_at: String,
+
+    #[serde(rename = "loadAverage15Min")]
+    pub load_average_15_min: f64,
+
+    #[serde(rename = "loadAverage1Min")]
+    pub load_average_1_min: f64,
+
+    #[serde(rename = "loadAverage5Min")]
+    pub load_average_5_min: f64,
+
+    #[serde(rename = "memoryUtilizationPct")]
+    pub memory_utilization_pct: f64,
+
+    #[serde(rename = "nextHeartbeatAt")]
+    pub next_heartbeat_at: String,
+
+    #[serde(rename = "uplink")]
+    pub uplink: UplinkStats,
+
+    #[serde(rename = "uptimeSec")]
+    pub uptime_sec: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UplinkStats {
+    #[serde(rename = "rxRateBps")]
+    pub rx_rate_bps: u64,
+
+    #[serde(rename = "txRateBps")]
+    pub tx_rate_bps: u64,
+}
+
+#[derive(Debug, Deserialize, Default)]
+pub struct Interfaces {
+    #[serde(default)]
+    pub radios: Vec<RadioStats>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RadioStats {
+    #[serde(rename = "frequencyGHz")]
+    pub frequency_ghz: f64,
+
+    #[serde(rename = "txRetriesPct")]
+    pub tx_retries_pct: f64,
 }
 
 impl UnifiClient {
@@ -216,6 +275,41 @@ impl UnifiClient {
             Err(anyhow!(
                 "Failed to fetch devices for site '{}'! Status: {}, Body: {}",
                 self.site_id,
+                status,
+                body
+            ))
+        }
+    }
+
+    pub async fn get_device_stats(&self, device_id: &str) -> Result<Value> {
+        let mut relative_path = API_PATH_DEVICE_STATS.replace("{site_id}", self.site_id.as_ref());
+
+        relative_path = relative_path.replace("{device_id}", device_id);
+
+        let device_stats_url = self
+            .endpoint
+            .join(&relative_path)
+            .map_err(|e| anyhow!("Failed to fetch device stats from URL: {}", e))?;
+
+        let response = self
+            .client
+            .get(device_stats_url)
+            .header("X-API-KEY", &self.api_token)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let device_stats_body: Value = response.json().await?;
+            Ok(device_stats_body)
+        } else {
+            let status = response.status();
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Failed to read response body".to_string());
+            Err(anyhow!(
+                "Faild to fetch device stats for: '{}'! Status '{}' Body: '{}'",
+                device_id,
                 status,
                 body
             ))

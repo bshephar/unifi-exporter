@@ -39,7 +39,7 @@ fn load_config() -> Result<(String, String), anyhow::Error> {
     Ok((endpoint, token))
 }
 
-async fn fetch_devices(client: &UnifiClient) -> Result<(), anyhow::Error> {
+async fn fetch_devices(client: &UnifiClient) -> Result<unifi::DevicesResponse, anyhow::Error> {
     println!("🔍 Fetching devices...");
     let raw_devices = client.get_devices().await?;
 
@@ -47,11 +47,11 @@ async fn fetch_devices(client: &UnifiClient) -> Result<(), anyhow::Error> {
         .map_err(|e| anyhow!("Failed to deserialize devices response: {}", e))?;
 
     println!("\nDiscovered {} device(s):", devices.data.len());
-    for device in devices.data {
+    for device in &devices.data {
         println!("- {} ({}) [{}]", device.name, device.model, device.state);
     }
 
-    Ok(())
+    Ok(devices)
 }
 
 #[tokio::main]
@@ -63,7 +63,16 @@ async fn main() -> Result<(), anyhow::Error> {
     client.authenticate().await?;
     println!("✅ Authenticated!");
 
-    let _ = fetch_devices(&client).await;
+    println!("Iterating devices");
+    let devices: unifi::DevicesResponse = fetch_devices(&client).await?;
+
+    for dev in &devices.data {
+        println!("\nStats for device: {dev_name}", dev_name = dev.name);
+        let raw_device_stats = client.get_device_stats(&dev.id.to_string()).await?;
+        let device_stats: unifi::DeviceStats = serde_json::from_value(raw_device_stats)
+            .map_err(|e| anyhow!("Failed to deserialize device stats response: {}", e))?;
+        println!("{:#?}", device_stats);
+    }
 
     println!("Done.");
     Ok(())
