@@ -71,7 +71,7 @@ async fn main() -> Result<(), anyhow::Error> {
         let raw_device_stats = client.get_device_stats(&dev.id.to_string()).await?;
         let device_stats: unifi::DeviceStats = serde_json::from_value(raw_device_stats)
             .map_err(|e| anyhow!("Failed to deserialize device stats response: {}", e))?;
-        println!("{:#?}", device_stats);
+        println!("{}", serde_json::to_string_pretty(&device_stats).unwrap());
     }
 
     println!("Done.");

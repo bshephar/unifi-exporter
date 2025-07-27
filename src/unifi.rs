@@ -60,7 +60,7 @@ pub struct Device {
     pub state: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DeviceStats {
     #[serde(rename = "cpuUtilizationPct")]
     pub cpu_utilization_pct: f64,
@@ -93,7 +93,7 @@ pub struct DeviceStats {
     pub uptime_sec: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UplinkStats {
     #[serde(rename = "rxRateBps")]
     pub rx_rate_bps: u64,
@@ -102,12 +102,12 @@ pub struct UplinkStats {
     pub tx_rate_bps: u64,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Interfaces {
     pub radios: Option<Vec<RadioStats>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RadioStats {
     #[serde(rename = "frequencyGHz")]
     pub frequency_ghz: f64,
