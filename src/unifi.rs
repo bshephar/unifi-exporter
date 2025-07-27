@@ -104,8 +104,7 @@ pub struct UplinkStats {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct Interfaces {
-    #[serde(default)]
-    pub radios: Vec<RadioStats>,
+    pub radios: Option<Vec<RadioStats>>,
 }
 
 #[derive(Debug, Deserialize)]
