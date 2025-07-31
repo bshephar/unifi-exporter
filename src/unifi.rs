@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use url::Url;
 
-const API_PATH_INFO: &str = "/proxy/network/integration/v1/info";
+let API_PATH_INFO: String = String::from("/proxy/network/integration/v1/info");
 const API_PATH_SITES: &str = "/proxy/network/integration/v1/sites";
 const API_PATH_DEVICES: &str = "/proxy/network/integration/v1/sites/{site_id}/devices";
 const API_PATH_DEVICE_STATS: &str =
@@ -129,9 +129,6 @@ impl UnifiClient {
         let endpoint = Url::parse(endpoint_str)?;
         let site_id: String = "".to_string();
 
-        // Initialize a reqwest client.
-        // For API token authentication, we don't need a cookie jar for session management,
-        // but we still need to handle self-signed certificates.
         let client = Client::builder()
             .danger_accept_invalid_certs(true)
             .build()?;
