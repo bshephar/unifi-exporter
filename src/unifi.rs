@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use url::Url;
 
-let API_PATH_INFO: String = String::from("/proxy/network/integration/v1/info");
+const API_PATH_INFO: &str = "/proxy/network/integration/v1/info";
 const API_PATH_SITES: &str = "/proxy/network/integration/v1/sites";
 const API_PATH_DEVICES: &str = "/proxy/network/integration/v1/sites/{site_id}/devices";
 const API_PATH_DEVICE_STATS: &str =
@@ -72,13 +72,13 @@ pub struct DeviceStats {
     pub last_heartbeat_at: String,
 
     #[serde(rename = "loadAverage15Min")]
-    pub load_average_15_min: f64,
+    pub load_average_15min: f64,
 
     #[serde(rename = "loadAverage1Min")]
-    pub load_average_1_min: f64,
+    pub load_average_1min: f64,
 
     #[serde(rename = "loadAverage5Min")]
-    pub load_average_5_min: f64,
+    pub load_average_5min: f64,
 
     #[serde(rename = "memoryUtilizationPct")]
     pub memory_utilization_pct: f64,
