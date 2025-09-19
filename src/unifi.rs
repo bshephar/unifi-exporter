@@ -2,7 +2,6 @@ use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 use url::Url;
 
 const API_PATH_INFO: &str = "/proxy/network/integration/v1/info";
@@ -127,7 +126,10 @@ impl UnifiClient {
     /// A `Result` containing the `UnifiClient` instance or an `anyhow::Error` if the endpoint URL is invalid.
     pub async fn new(endpoint_str: &str, api_token: String) -> Result<Self> {
         let endpoint = Url::parse(endpoint_str)?;
-        let site_id: String = "".to_string();
+
+        // site_id is not currently used, but will need to be implemented to
+        // support multi-site Unifi monitoring.
+        let _site_id: String = "".to_string();
 
         let client = Client::builder()
             .danger_accept_invalid_certs(true)
@@ -137,7 +139,7 @@ impl UnifiClient {
             client,
             endpoint,
             api_token,
-            site_id: "".to_string(),
+            site_id: _site_id,
         };
 
         unifi.fetch_and_set_site_id().await?;

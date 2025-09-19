@@ -4,9 +4,8 @@ mod unifi;
 use ::clap::Parser;
 use anyhow::anyhow;
 use exporter::MetricsExporter;
-use reqwest::Error;
 use std::env;
-use unifi::{SitesResponse, UnifiClient};
+use unifi::UnifiClient;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -60,7 +59,7 @@ async fn fetch_devices(client: &UnifiClient) -> Result<unifi::DevicesResponse, a
 async fn main() -> Result<(), anyhow::Error> {
     let (endpoint, token) = load_config()?;
 
-    let mut client = UnifiClient::new(&endpoint, token).await?;
+    let client = UnifiClient::new(&endpoint, token).await?;
     println!("Authenticating...");
     client.authenticate().await?;
     println!("✅ Authenticated!");
@@ -68,7 +67,7 @@ async fn main() -> Result<(), anyhow::Error> {
     println!("Iterating devices");
     let devices: unifi::DevicesResponse = fetch_devices(&client).await?;
 
-    let mut exporter: MetricsExporter = MetricsExporter::new()?;
+    let exporter: MetricsExporter = MetricsExporter::new()?;
 
     for dev in &devices.data {
         println!("\nStats for device: {dev_name}", dev_name = dev.name);
