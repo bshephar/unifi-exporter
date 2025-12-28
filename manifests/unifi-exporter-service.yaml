@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: unifi-exporter-service
+  namespace: monitoring
+  labels:
+    app: unifi-exporter
+spec:
+  selector:
+    app: unifi-exporter
+  ports:
+    - name: http-metrics
+      protocol: TCP
+      port: 8080
+      targetPort: 8080

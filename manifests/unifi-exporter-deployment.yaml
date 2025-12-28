@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unifi-exporter
+  namespace: monitoring
+  labels:
+    app: unifi-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: unifi-exporter
+  template:
+    metadata:
+      labels:
+        app: unifi-exporter
+    spec:
+      containers:
+      - name: exporter
+        image: ghcr.io/bshephar/unifi-exporter:latest
+        imagePullPolicy: Always
+        command: ["./exporter"]
+        ports:
+        - containerPort: 8080
+          name: http-metrics
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        env:
+        - name: UNIFI_API_ENDPOINT
+          value: "https://172.20.0.254"
+        - name: RUST_LOG
+          value: info
+        - name: UNIFI_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: unifi-exporter
+              key: UNIFI_API_TOKEN
+        resources:
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
