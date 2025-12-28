@@ -7,6 +7,8 @@ use exporter::MetricsExporter;
 use std::env;
 use unifi::UnifiClient;
 
+use actix_web::{App, HttpResponse, HttpServer, web};
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -55,6 +57,18 @@ async fn fetch_devices(client: &UnifiClient) -> Result<unifi::DevicesResponse, a
     Ok(devices)
 }
 
+async fn serve_metrics(
+    exporter: web::Data<MetricsExporter>,
+) -> Result<HttpResponse, actix_web::Error> {
+    let body = exporter
+        .render()
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/plain; version=0.0.4; charset=utf-8")
+        .body(body))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let (endpoint, token) = load_config()?;
@@ -75,10 +89,20 @@ async fn main() -> Result<(), anyhow::Error> {
         let device_stats: unifi::DeviceStats = serde_json::from_value(raw_device_stats)
             .map_err(|e| anyhow!("Failed to deserialize device stats response: {}", e))?;
         exporter.update_device_metrics(dev.name.as_str(), &device_stats);
-        let res = exporter.render();
-        println!("Results of prom render: {:#?}", res);
     }
 
-    println!("Done.");
-    Ok(())
+    let res = exporter.render();
+
+    let exporter_data = web::Data::new(exporter);
+
+    // Needs to be thread safe, so we can clone the data for each thread.
+    HttpServer::new(move || {
+        App::new()
+            .app_data(exporter_data.clone())
+            .route("/metrics", web::get().to(serve_metrics))
+    })
+    .bind("127.0.0.1:8080")?
+    .run()
+    .await
+    .map_err(anyhow::Error::from)
 }
