@@ -8,6 +8,8 @@ use std::env;
 use unifi::UnifiClient;
 
 use actix_web::{App, HttpResponse, HttpServer, web};
+use tracing::info;
+use tracing_subscriber;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -20,6 +22,7 @@ struct Args {
     #[arg(short, long)]
     token: Option<String>,
 }
+
 fn load_config() -> Result<(String, String), anyhow::Error> {
     let args = Args::parse();
 
@@ -28,7 +31,7 @@ fn load_config() -> Result<(String, String), anyhow::Error> {
         .or_else(|| env::var("UNIFI_API_ENDPOINT").ok())
         .unwrap_or_else(|| {
             let default = "https://192.168.3.254".to_string();
-            println!("Using default endpoint: {}", default);
+            info!("Using default endpoint: {}", default);
             default
         });
 
@@ -43,15 +46,15 @@ fn load_config() -> Result<(String, String), anyhow::Error> {
 }
 
 async fn fetch_devices(client: &UnifiClient) -> Result<unifi::DevicesResponse, anyhow::Error> {
-    println!("🔍 Fetching devices...");
+    info!("Fetching devices...");
     let raw_devices = client.get_devices().await?;
 
     let devices: unifi::DevicesResponse = serde_json::from_value(raw_devices)
         .map_err(|e| anyhow!("Failed to deserialize devices response: {}", e))?;
 
-    println!("\nDiscovered {} device(s):", devices.data.len());
+    info!("Discovered {} device(s):", devices.data.len());
     for device in &devices.data {
-        println!("- {} ({}) [{}]", device.name, device.model, device.state);
+        info!("- {} ({}) [{}]", device.name, device.model, device.state);
     }
 
     Ok(devices)
@@ -72,19 +75,19 @@ async fn serve_metrics(
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let (endpoint, token) = load_config()?;
+    tracing_subscriber::fmt::init();
 
     let client = UnifiClient::new(&endpoint, token).await?;
-    println!("Authenticating...");
+    info!("Authenticating...");
     client.authenticate().await?;
-    println!("✅ Authenticated!");
+    info!("Authenticated!");
 
-    println!("Iterating devices");
+    info!("Iterating devices");
     let devices: unifi::DevicesResponse = fetch_devices(&client).await?;
 
     let exporter: MetricsExporter = MetricsExporter::new()?;
 
     for dev in &devices.data {
-        println!("\nStats for device: {dev_name}", dev_name = dev.name);
         let raw_device_stats = client.get_device_stats(&dev.id.to_string()).await?;
         let device_stats: unifi::DeviceStats = serde_json::from_value(raw_device_stats)
             .map_err(|e| anyhow!("Failed to deserialize device stats response: {}", e))?;
@@ -96,12 +99,15 @@ async fn main() -> Result<(), anyhow::Error> {
     let exporter_data = web::Data::new(exporter);
 
     // Needs to be thread safe, so we can clone the data for each thread.
+
+    const EXPOSE_ADDRESS: &str = "0.0.0.0:8080";
+    info!("Exposing unifi metrics on: {}", EXPOSE_ADDRESS);
     HttpServer::new(move || {
         App::new()
             .app_data(exporter_data.clone())
             .route("/metrics", web::get().to(serve_metrics))
     })
-    .bind("0.0.0.0:8080")?
+    .bind(EXPOSE_ADDRESS)?
     .run()
     .await
     .map_err(anyhow::Error::from)

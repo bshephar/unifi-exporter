@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use url::Url;
 
+use tracing::info;
+
 const API_PATH_INFO: &str = "/proxy/network/integration/v1/info";
 const API_PATH_SITES: &str = "/proxy/network/integration/v1/sites";
 const API_PATH_DEVICES: &str = "/proxy/network/integration/v1/sites/{site_id}/devices";
@@ -153,7 +155,7 @@ impl UnifiClient {
             .join(API_PATH_INFO)
             .map_err(|e| anyhow!("Failed to construct test URL: {}", e))?;
 
-        println!(
+        info!(
             "Attempting to authenticate with Unifi controller at: {}",
             test_url
         );
@@ -166,7 +168,7 @@ impl UnifiClient {
             .await?;
 
         if response.status().is_success() {
-            println!("Authentication successful with API token!");
+            info!("Authentication successful with API token!");
             Ok(())
         } else {
             let status = response.status();
@@ -187,7 +189,7 @@ impl UnifiClient {
             .join(API_PATH_SITES)
             .map_err(|e| anyhow!("Failed to construct sites URL: {}", e))?;
 
-        println!("Fetching sites from: {}", sites_url);
+        info!("Fetching sites from: {}", sites_url);
 
         let response = self
             .client
@@ -214,9 +216,9 @@ impl UnifiClient {
     }
 
     pub async fn fetch_and_set_site_id(&mut self) -> Result<()> {
-        println!("📡 Fetching sites...");
+        info!("📡 Fetching sites...");
         let sites = self.get_sites().await?;
-        println!("{}", serde_json::to_string_pretty(&sites)?);
+        info!("{}", serde_json::to_string_pretty(&sites)?);
 
         let site_id = sites["data"]
             .as_array()
@@ -225,7 +227,7 @@ impl UnifiClient {
 
         match site_id {
             Some(id) => {
-                println!("✅ Using site ID: {}", id);
+                info!("✅ Using site ID: {}", id);
                 self.site_id = id.to_string();
                 Ok(())
             }
@@ -249,7 +251,7 @@ impl UnifiClient {
             .join(&relative_path)
             .map_err(|e| anyhow!("Failed to construct devices URL: {}", e))?;
 
-        println!(
+        info!(
             "Fetching devices for site '{}' from: {}",
             self.site_id, devices_url
         );
