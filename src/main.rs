@@ -91,7 +91,7 @@ async fn main() -> Result<(), anyhow::Error> {
         exporter.update_device_metrics(dev.name.as_str(), &device_stats);
     }
 
-    let res = exporter.render();
+    exporter.render()?;
 
     let exporter_data = web::Data::new(exporter);
 
