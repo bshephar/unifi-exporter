@@ -101,7 +101,7 @@ async fn main() -> Result<(), anyhow::Error> {
             .app_data(exporter_data.clone())
             .route("/metrics", web::get().to(serve_metrics))
     })
-    .bind("127.0.0.1:8080")?
+    .bind("0.0.0.0:8080")?
     .run()
     .await
     .map_err(anyhow::Error::from)
