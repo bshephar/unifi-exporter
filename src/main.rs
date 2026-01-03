@@ -23,6 +23,8 @@ struct Args {
     token: Option<String>,
 }
 
+const EXPOSE_ADDRESS: &str = "0.0.0.0:8080";
+
 fn load_config() -> Result<(String, String), anyhow::Error> {
     let args = Args::parse();
 
@@ -72,19 +74,10 @@ async fn serve_metrics(
         .body(body))
 }
 
-#[tokio::main]
-async fn main() -> Result<(), anyhow::Error> {
-    let (endpoint, token) = load_config()?;
-    tracing_subscriber::fmt::init();
-
-    let client = UnifiClient::new(&endpoint, token).await?;
-    info!("Authenticating...");
-    client.authenticate().await?;
-    info!("Authenticated!");
-
-    info!("Iterating devices");
-    let devices: unifi::DevicesResponse = fetch_devices(&client).await?;
-
+async fn render_exporter_data(
+    devices: unifi::DevicesResponse,
+    client: UnifiClient,
+) -> Result<actix_web::web::Data<MetricsExporter>, anyhow::Error> {
     let exporter: MetricsExporter = MetricsExporter::new()?;
 
     for dev in &devices.data {
@@ -97,11 +90,26 @@ async fn main() -> Result<(), anyhow::Error> {
     exporter.render()?;
 
     let exporter_data = web::Data::new(exporter);
+    Ok(exporter_data)
+}
+
+#[tokio::main]
+async fn main() -> Result<(), anyhow::Error> {
+    let (endpoint, token) = load_config()?;
+    tracing_subscriber::fmt::init();
+
+    let client = UnifiClient::new(&endpoint, token).await?;
+    info!("Authenticating...");
+    client.authenticate().await?;
+    info!("Authenticated!");
+
+    let devices: unifi::DevicesResponse = fetch_devices(&client).await?;
+
+    let exporter_data = render_exporter_data(devices, client).await?;
+
+    info!("Exposing unifi metrics on: {}", EXPOSE_ADDRESS);
 
     // Needs to be thread safe, so we can clone the data for each thread.
-
-    const EXPOSE_ADDRESS: &str = "0.0.0.0:8080";
-    info!("Exposing unifi metrics on: {}", EXPOSE_ADDRESS);
     HttpServer::new(move || {
         App::new()
             .app_data(exporter_data.clone())
