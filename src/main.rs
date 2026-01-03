@@ -5,10 +5,13 @@ use ::clap::Parser;
 use anyhow::anyhow;
 use exporter::MetricsExporter;
 use std::env;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+use tokio::time::{Duration, sleep};
 use unifi::UnifiClient;
 
 use actix_web::{App, HttpResponse, HttpServer, web};
-use tracing::info;
+use tracing::{error, info, warn};
 use tracing_subscriber;
 
 #[derive(Parser, Debug)]
@@ -24,6 +27,7 @@ struct Args {
 }
 
 const EXPOSE_ADDRESS: &str = "0.0.0.0:8080";
+const SLEEP_TIME: u64 = 300;
 
 fn load_config() -> Result<(String, String), anyhow::Error> {
     let args = Args::parse();
@@ -76,7 +80,7 @@ async fn serve_metrics(
 
 async fn render_exporter_data(
     devices: unifi::DevicesResponse,
-    client: UnifiClient,
+    client: &Arc<UnifiClient>,
 ) -> Result<actix_web::web::Data<MetricsExporter>, anyhow::Error> {
     let exporter: MetricsExporter = MetricsExporter::new()?;
 
@@ -98,21 +102,52 @@ async fn main() -> Result<(), anyhow::Error> {
     let (endpoint, token) = load_config()?;
     tracing_subscriber::fmt::init();
 
-    let client = UnifiClient::new(&endpoint, token).await?;
+    let client = Arc::new(UnifiClient::new(&endpoint, token).await?);
     info!("Authenticating...");
     client.authenticate().await?;
     info!("Authenticated!");
 
-    let devices: unifi::DevicesResponse = fetch_devices(&client).await?;
+    let shared_data = Arc::new(RwLock::new(String::new()));
 
-    let exporter_data = render_exporter_data(devices, client).await?;
+    let loop_client = client.clone();
+    let data_ptr = shared_data.clone();
+
+    tokio::spawn(async move {
+        loop {
+            match fetch_devices(&loop_client).await {
+                Ok(devices) => {
+                    match render_exporter_data(devices, &loop_client).await {
+                        Ok(new_exporter_obj) => {
+                            // Convert the exporter object into the actual String
+                            match new_exporter_obj.render() {
+                                Ok(rendered_string) => {
+                                    let mut w = data_ptr.write().await;
+                                    *w = rendered_string;
+                                    info!("Metrics cache updated.");
+                                }
+                                Err(e) => error!("Failed to format metrics: {}", e),
+                            }
+                        }
+                        Err(e) => error!("Rendering error: {}", e),
+                    }
+                }
+                Err(e) if e.to_string().contains("401") => {
+                    warn!("Session expired, re-authenticating...");
+                    let _ = loop_client.authenticate().await;
+                }
+                Err(e) => error!("Fetch error: {}", e),
+            }
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(SLEEP_TIME)).await;
+        }
+    });
 
     info!("Exposing unifi metrics on: {}", EXPOSE_ADDRESS);
 
-    // Needs to be thread safe, so we can clone the data for each thread.
     HttpServer::new(move || {
         App::new()
-            .app_data(exporter_data.clone())
+            // Wrap the Arc in web::Data so Actix can extract it in the handler
+            .app_data(web::Data::new(shared_data.clone()))
             .route("/metrics", web::get().to(serve_metrics))
     })
     .bind(EXPOSE_ADDRESS)?
