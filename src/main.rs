@@ -7,7 +7,6 @@ use exporter::MetricsExporter;
 use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::time::{Duration, sleep};
 use unifi::UnifiClient;
 
 use actix_web::{App, HttpResponse, HttpServer, web};
@@ -67,21 +66,19 @@ async fn fetch_devices(client: &UnifiClient) -> Result<unifi::DevicesResponse, a
 }
 
 async fn serve_metrics(
-    exporter: web::Data<MetricsExporter>,
+    metrics_cache: web::Data<Arc<RwLock<String>>>,
 ) -> Result<HttpResponse, actix_web::Error> {
-    let body = exporter
-        .render()
-        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+    let body = metrics_cache.read().await.clone();
 
     Ok(HttpResponse::Ok()
         .content_type("text/plain; version=0.0.4; charset=utf-8")
         .body(body))
 }
 
-async fn render_exporter_data(
-    devices: unifi::DevicesResponse,
+async fn collect_and_render_metrics(
     client: &Arc<UnifiClient>,
-) -> Result<actix_web::web::Data<MetricsExporter>, anyhow::Error> {
+) -> Result<String, anyhow::Error> {
+    let devices = fetch_devices(client).await?;
     let exporter: MetricsExporter = MetricsExporter::new()?;
 
     for dev in &devices.data {
@@ -91,10 +88,7 @@ async fn render_exporter_data(
         exporter.update_device_metrics(dev.name.as_str(), &device_stats);
     }
 
-    exporter.render()?;
-
-    let exporter_data = web::Data::new(exporter);
-    Ok(exporter_data)
+    exporter.render()
 }
 
 #[tokio::main]
@@ -109,33 +103,40 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let shared_data = Arc::new(RwLock::new(String::new()));
 
+    // Perform initial metrics collection before starting the server
+    info!("Performing initial metrics collection...");
+    match collect_and_render_metrics(&client).await {
+        Ok(rendered_string) => {
+            let mut w = shared_data.write().await;
+            *w = rendered_string;
+            info!("Initial metrics cache populated.");
+        }
+        Err(e) => {
+            error!("Initial metrics collection failed: {}", e);
+            // Continue anyway - the background loop will retry
+        }
+    }
+
+    // Background task to continuously collect metrics every 5 minutes
     let loop_client = client.clone();
     let data_ptr = shared_data.clone();
-
     tokio::spawn(async move {
         loop {
-            match fetch_devices(&loop_client).await {
-                Ok(devices) => {
-                    match render_exporter_data(devices, &loop_client).await {
-                        Ok(new_exporter_obj) => {
-                            // Convert the exporter object into the actual String
-                            match new_exporter_obj.render() {
-                                Ok(rendered_string) => {
-                                    let mut w = data_ptr.write().await;
-                                    *w = rendered_string;
-                                    info!("Metrics cache updated.");
-                                }
-                                Err(e) => error!("Failed to format metrics: {}", e),
-                            }
-                        }
-                        Err(e) => error!("Rendering error: {}", e),
-                    }
+            match collect_and_render_metrics(&loop_client).await {
+                Ok(rendered_string) => {
+                    let mut w = data_ptr.write().await;
+                    *w = rendered_string;
+                    info!("Metrics cache updated.");
                 }
                 Err(e) if e.to_string().contains("401") => {
                     warn!("Session expired, re-authenticating...");
-                    let _ = loop_client.authenticate().await;
+                    if let Err(auth_err) = loop_client.authenticate().await {
+                        error!("Re-authentication failed: {}", auth_err);
+                    }
                 }
-                Err(e) => error!("Fetch error: {}", e),
+                Err(e) => {
+                    error!("Metrics collection error: {}", e);
+                }
             }
 
             tokio::time::sleep(tokio::time::Duration::from_secs(SLEEP_TIME)).await;
