@@ -54,3 +54,6 @@ Once the manifests have been modified as per your requirements, you can deploy t
 cd manifests
 kubectl apply -f .
 ```
+
+![Alt text](./prometheus-screenshot.png?raw=true "Prometheus RX Screenshot")
+
